@@ -19,6 +19,7 @@ export default function ThreeScene() {
   const dragRef = useRef({ active: false, x: 0, y: 0 });
   const viewRef = useRef({ ...initialView });
   const renderTokenRef = useRef(0);
+  const redrawRef = useRef(() => {});
 
   const [controls, setControls] = useState({
     iterations: 180,
@@ -40,9 +41,10 @@ export default function ThreeScene() {
     const syncCanvas = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
-      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
-      canvas.width = Math.floor(width * ratio);
-      canvas.height = Math.floor(height * ratio);
+      const targetWidth = Math.min(560, width);
+      const targetHeight = Math.max(320, Math.floor(targetWidth * (height / width)));
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       renderMandelbrot();
@@ -54,60 +56,50 @@ export default function ThreeScene() {
       const height = canvas.height;
       const aspect = width / height;
       const image = context.createImageData(width, height);
-      let y = 0;
-
-      const drawChunk = () => {
-        if (token !== renderTokenRef.current) {
-          return;
-        }
-
-        const maxY = Math.min(height, y + 24);
-        for (; y < maxY; y += 1) {
-          for (let x = 0; x < width; x += 1) {
-            const scaledX = ((x / width) - 0.5) * 3.2 / viewRef.current.zoom * aspect + viewRef.current.centerX;
-            const scaledY = ((y / height) - 0.5) * 3.2 / viewRef.current.zoom + viewRef.current.centerY;
-
-            let zx = 0;
-            let zy = 0;
-            let iteration = 0;
-
-            while (zx * zx + zy * zy <= 4 && iteration < controls.iterations) {
-              const nextX = zx * zx - zy * zy + scaledX;
-              zy = 2 * zx * zy + scaledY;
-              zx = nextX;
-              iteration += 1;
-            }
-
-            const index = (y * width + x) * 4;
-            if (iteration === controls.iterations) {
-              image.data[index] = 4;
-              image.data[index + 1] = 4;
-              image.data[index + 2] = 10;
-              image.data[index + 3] = 255;
-              continue;
-            }
-
-            const magnitude = Math.sqrt(zx * zx + zy * zy);
-            const smooth = iteration + 1 - Math.log2(Math.log2(Math.max(magnitude, 2)));
-            const normalized = smooth / controls.iterations;
-            const [r, g, b] = paletteColor(normalized, controls.colorOffset);
-
-            image.data[index] = r;
-            image.data[index + 1] = g;
-            image.data[index + 2] = b;
-            image.data[index + 3] = 255;
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          if (token !== renderTokenRef.current) {
+            return;
           }
+
+          const scaledX = ((x / width) - 0.5) * 3.2 / viewRef.current.zoom * aspect + viewRef.current.centerX;
+          const scaledY = ((y / height) - 0.5) * 3.2 / viewRef.current.zoom + viewRef.current.centerY;
+
+          let zx = 0;
+          let zy = 0;
+          let iteration = 0;
+
+          while (zx * zx + zy * zy <= 4 && iteration < controls.iterations) {
+            const nextX = zx * zx - zy * zy + scaledX;
+            zy = 2 * zx * zy + scaledY;
+            zx = nextX;
+            iteration += 1;
+          }
+
+          const index = (y * width + x) * 4;
+          if (iteration === controls.iterations) {
+            image.data[index] = 4;
+            image.data[index + 1] = 4;
+            image.data[index + 2] = 10;
+            image.data[index + 3] = 255;
+            continue;
+          }
+
+          const magnitude = Math.sqrt(zx * zx + zy * zy);
+          const smooth = iteration + 1 - Math.log2(Math.log2(Math.max(magnitude, 2)));
+          const normalized = smooth / controls.iterations;
+          const [r, g, b] = paletteColor(normalized, controls.colorOffset);
+
+          image.data[index] = r;
+          image.data[index + 1] = g;
+          image.data[index + 2] = b;
+          image.data[index + 3] = 255;
         }
+      }
 
-        context.putImageData(image, 0, 0);
-
-        if (y < height) {
-          requestAnimationFrame(drawChunk);
-        }
-      };
-
-      drawChunk();
+      context.putImageData(image, 0, 0);
     };
+    redrawRef.current = renderMandelbrot;
 
     const onPointerDown = (event) => {
       dragRef.current.active = true;
@@ -175,27 +167,8 @@ export default function ThreeScene() {
   const resetView = () => {
     viewRef.current = { ...initialView };
     setView({ ...initialView });
-    renderTokenRef.current += 1;
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.dispatchEvent(new Event('refresh'));
-    }
+    redrawRef.current();
   };
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    const rerender = () => {
-      const event = new Event('resize');
-      window.dispatchEvent(event);
-    };
-
-    canvas.addEventListener('refresh', rerender);
-    return () => canvas.removeEventListener('refresh', rerender);
-  }, []);
 
   return (
     <>
