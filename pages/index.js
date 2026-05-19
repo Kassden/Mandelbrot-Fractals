@@ -1,5 +1,4 @@
 import Head from 'next/head';
-import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 
 // Dynamic import of THREE to avoid SSR issues
@@ -11,7 +10,11 @@ export default function Home() {
   return (
     <div>
       <Head>
-        <title>Dynamic Mandelbrot Set - Three.js</title>
+        <title>Three.js Mandelbrot</title>
+        <meta
+          name="description"
+          content="Interactive Mandelbrot viewer built with Three.js shaders."
+        />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 

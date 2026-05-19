@@ -1,559 +1,322 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
-// Move shaders outside component to prevent recreating on each render
 const vertexShader = `
-  varying vec3 vPos;
+  varying vec2 vUv;
+
   void main() {
-    vPos = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vUv = uv;
+    gl_Position = vec4(position, 1.0);
   }
 `;
 
-// Add 2D Mandelbrot shader
-const mandelbrotShader = `
-  varying vec3 vPos;
+const fragmentShader = `
+  varying vec2 vUv;
+
   uniform float time;
-  uniform vec2 rotation;
   uniform float zoom;
-  uniform float power;
-  uniform float colorSpeed;
-  uniform float colorIntensity;
-  uniform float distortionScale;
-  uniform float pulseSpeed;
-  uniform float pulseIntensity;
+  uniform vec2 center;
+  uniform float iterations;
+  uniform float colorOffset;
+  uniform vec2 resolution;
 
   vec3 palette(float t) {
-    t = t * 0.5;
-    vec3 a = vec3(0.5, 0.5, 0.5);
-    vec3 b = vec3(0.5, 0.5, 0.5);
-    vec3 c = vec3(1.0, 1.0, 0.7);
-    vec3 d = vec3(0.30, 0.20, 0.20);
+    vec3 a = vec3(0.12, 0.08, 0.18);
+    vec3 b = vec3(0.55, 0.45, 0.35);
+    vec3 c = vec3(1.0, 0.9, 0.7);
+    vec3 d = vec3(0.0, 0.15, 0.25);
     return a + b * cos(6.28318 * (c * t + d));
   }
 
   void main() {
-    vec2 uv = vPos.xy;
-    
-    // Transform coordinates
-    vec2 c = (uv * 4.0) / zoom;
-    c += vec2(rotation.x * 2.0 - 1.5, rotation.y);
-    
+    vec2 uv = (vUv - 0.5) * 2.0;
+    uv.x *= resolution.x / resolution.y;
+
+    vec2 c = center + uv / zoom;
     vec2 z = vec2(0.0);
-    float n = 0.0;
-    
-    // Mandelbrot iteration
-    for(int i = 0; i < 256; i++) {
+    float escapedAt = iterations;
+
+    for (int i = 0; i < 400; i++) {
+      if (float(i) >= iterations) {
+        break;
+      }
+
       z = vec2(
         z.x * z.x - z.y * z.y + c.x,
         2.0 * z.x * z.y + c.y
       );
-      
-      if(dot(z, z) > 4.0) break;
-      n += 1.0;
+
+      if (dot(z, z) > 4.0) {
+        float smooth = float(i) + 1.0 - log2(log2(dot(z, z)));
+        escapedAt = smooth;
+        break;
+      }
     }
-    
-    // Coloring
-    float t = n / 256.0;
-    t = pow(t, 0.5); // Smooth color distribution
-    vec3 color = palette(t * colorIntensity + time * colorSpeed);
-    
-    // Add pulse effect
-    float pulse = sin(time * pulseSpeed) * 0.5 + 0.5;
-    color *= 1.0 + pulse * pulseIntensity;
-    
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
 
-// Fragment shader for 3D Mandelbulb
-const mandelbulbShader = `
-  varying vec3 vPos;
-  uniform float time;
-  uniform vec2 rotation;
-  uniform float zoom;
-  uniform float power;
-  uniform float colorSpeed;
-  uniform float colorIntensity;
-  uniform float distortionScale;
-  uniform float pulseSpeed;
-  uniform float pulseIntensity;
-
-  // Optimize by reducing iterations and simplifying calculations
-  const int MAX_STEPS = 64;  // Reduced from 100
-  const float MIN_DIST = 0.001;
-  const float MAX_DIST = 50.0; // Reduced from 100
-
-  // Smooth color palette with better transitions
-  vec3 palette(float t) {
-    // Slower color cycling for smoother transitions
-    t = t * 0.5;
-    
-    // Softer, more harmonious colors
-    vec3 a = vec3(0.5, 0.5, 0.5);
-    vec3 b = vec3(0.5, 0.5, 0.5);
-    vec3 c = vec3(1.0, 1.0, 0.7);
-    vec3 d = vec3(0.30, 0.20, 0.20);
-
-    // Smooth mouse influence
-    float mouseInfluence = (sin(time * 0.5) * 0.5 + 0.5) * length(rotation);
-    d += vec3(rotation.x, rotation.y, mouseInfluence) * 0.1;
-    
-    return a + b * cos(6.28318 * (c * t + d));
-  }
-
-  // Smooth blend between two colors
-  vec3 smoothColor(float t) {
-    vec3 col1 = palette(t);
-    vec3 col2 = palette(t + 0.1);
-    float blend = fract(t * 10.0);
-    blend = smoothstep(0.0, 1.0, blend);
-    return mix(col1, col2, blend);
-  }
-
-  vec2 hexCoords(vec2 uv) {
-    vec2 r = vec2(1.0, 1.73);
-    vec2 h = r * 0.5;
-    vec2 a = mod(uv, r) - h;
-    vec2 b = mod(uv + h, r) - h;
-    return dot(a, a) < dot(b, b) ? a : b;
-  }
-
-  float mandelbulb(vec3 pos) {
-    vec3 z = pos;
-    float dr = 1.0;
-    float r = 0.0;
-    
-    // Smoother power variation
-    float power = float(power) + rotation.x * sin(time) * 1.5;
-    
-    for (int i = 0; i < 12; i++) {
-      r = length(z);
-      if (r > 2.0) break;
-      
-      float theta = acos(z.z/r) + rotation.y * 0.2 * sin(time);
-      float phi = atan(z.y, z.x) + rotation.x * 0.2 * cos(time);
-      dr = pow(r, power-1.0) * power * dr + 1.0;
-      
-      float zr = pow(r, power);
-      theta = theta * power;
-      phi = phi * power;
-      
-      z = zr * vec3(
-        sin(theta) * cos(phi),
-        sin(theta) * sin(phi),
-        cos(theta)
-      );
-      z += pos;
-    }
-    return 0.5 * log(r) * r / dr;
-  }
-
-  // Ray marching function
-  float rayMarch(vec3 ro, vec3 rd) {
-    float depth = 0.0;
-    
-    for (int i = 0; i < MAX_STEPS; i++) {
-      vec3 pos = ro + depth * rd;
-      float dist = mandelbulb(pos);
-      
-      if (dist < MIN_DIST) return depth;
-      depth += dist;
-      if (depth >= MAX_DIST) break;
-    }
-    
-    return MAX_DIST;
-  }
-
-  // Calculate normal
-  vec3 getNormal(vec3 p) {
-    float d = mandelbulb(p);
-    vec2 e = vec2(0.001, 0.0);
-    vec3 n = d - vec3(
-      mandelbulb(p - e.xyy),
-      mandelbulb(p - e.yxy),
-      mandelbulb(p - e.yyx)
-    );
-    return normalize(n);
-  }
-
-  void main() {
-    vec2 uv = vPos.xy;
-    
-    // Smoother hexagonal distortion
-    vec2 hex = hexCoords(uv * 3.0 + rotation * sin(time * 0.5));
-    uv += hex * (sin(time) * 0.01);
-    
-    float rotX = rotation.y * 2.0 * 3.14159 + time * 0.1;
-    float rotY = rotation.x * 2.0 * 3.14159 + time * 0.1;
-    
-    vec3 ro = vec3(
-      2.5 * sin(rotY) * cos(rotX),
-      2.5 * sin(rotX),
-      2.5 * cos(rotY) * cos(rotX)
-    ) / zoom;
-    
-    vec3 target = vec3(0.0);
-    vec3 forward = normalize(target - ro);
-    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
-    vec3 up = cross(forward, right);
-    vec3 rd = normalize(forward + right * uv.x + up * uv.y);
-    
-    float d = rayMarch(ro, rd);
-    
-    if (d >= MAX_DIST) {
-      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    if (escapedAt >= iterations) {
+      gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);
       return;
     }
-    
-    vec3 p = ro + rd * d;
-    vec3 normal = getNormal(p);
-    vec3 light = normalize(vec3(1.0, 1.0, 1.0));
-    float diff = max(0.0, dot(normal, light));
-    
-    // Smoother color transitions
-    float colorTime = time * 0.2;
-    vec3 baseColor = smoothColor(length(p) * 0.1 + colorTime);
-    baseColor *= smoothColor(dot(normal, vec3(1.0)) * 0.2 + colorTime * 0.7);
-    vec3 color = baseColor;
-    
-    // Smooth rim lighting
-    float rim = 1.0 - max(0.0, dot(normal, -rd));
-    rim = smoothstep(0.0, 1.0, rim);
-    color += smoothColor(rim + colorTime * 0.5) * pow(rim, 1.5) * 0.5;
-    
-    // Smooth specular highlights
-    vec3 reflected = reflect(-light, normal);
-    float spec = pow(max(0.0, dot(reflected, -rd)), 8.0);
-    spec = smoothstep(0.0, 1.0, spec);
-    color += smoothColor(spec + colorTime) * spec * 0.3;
-    
-    // Smooth lighting transitions
-    diff = smoothstep(0.0, 1.0, diff);
-    color *= diff;
-    color += baseColor * 0.15; // ambient
-    
-    // Smooth pulsing
-    float pulse = sin(colorTime + length(p) * 2.0) * 0.5 + 0.5;
-    pulse = smoothstep(0.0, 1.0, pulse);
-    color *= 1.0 + pulse * 0.1;
-    
-    // Smooth distance fog
-    float fog = exp(-d * 0.08);
-    fog = smoothstep(0.0, 1.0, fog);
-    color *= fog;
-    
-    // Smooth final color blend
-    vec3 cycleColor = smoothColor(rotation.x + rotation.y + colorTime * 0.5);
-    color = mix(color, cycleColor, 0.2);
-    
+
+    float t = escapedAt / iterations;
+    vec3 color = palette(t + colorOffset + time * 0.03);
+    color *= 0.85 + 0.15 * sin(6.28318 * (t + time * 0.04));
+
     gl_FragColor = vec4(color, 1.0);
   }
 `;
+
+const initialView = {
+  zoom: 0.9,
+  centerX: -0.5,
+  centerY: 0.0
+};
 
 export default function ThreeScene() {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
-  const sceneRef = useRef(null);
   const materialRef = useRef(null);
-  const frameIdRef = useRef(null);
-  const isDraggingRef = useRef(false);
-  const lastMouseRef = useRef({ x: 0, y: 0 });
-  const rotationRef = useRef({ x: 0, y: 0 });
-  const zoomRef = useRef(1.0);
-  const startTime = useRef(Date.now());
-
-  // Memoize controls to prevent unnecessary rerenders
-  const [controls, setControls] = useState({
-    is2D: false,
-    power: 8,
-    colorSpeed: 0.2,
-    colorIntensity: 0.5,
-    distortionScale: 3.0,
-    pulseSpeed: 2.0,
-    pulseIntensity: 0.1
+  const animationRef = useRef(null);
+  const startTimeRef = useRef(0);
+  const dragRef = useRef({
+    active: false,
+    x: 0,
+    y: 0
+  });
+  const viewRef = useRef({
+    zoom: initialView.zoom,
+    centerX: initialView.centerX,
+    centerY: initialView.centerY
   });
 
-  // Memoize handlers
-  const handleMouseDown = useCallback((event) => {
-    isDraggingRef.current = true;
-    lastMouseRef.current = {
-      x: event.clientX,
-      y: event.clientY
-    };
-  }, []);
+  const [controls, setControls] = useState({
+    iterations: 180,
+    colorOffset: 0.0
+  });
+  const [view, setView] = useState(viewRef.current);
 
-  const handleMouseUp = useCallback(() => {
-    isDraggingRef.current = false;
-  }, []);
-
-  const handleMouseMove = useCallback((event) => {
-    if (!isDraggingRef.current) return;
-    
-    const deltaX = (event.clientX - lastMouseRef.current.x) / window.innerWidth;
-    const deltaY = (event.clientY - lastMouseRef.current.y) / window.innerHeight;
-    
-    rotationRef.current.x = (rotationRef.current.x + deltaY * 2) % (Math.PI * 2);
-    rotationRef.current.y = (rotationRef.current.y + deltaX * 2) % (Math.PI * 2);
-    
-    lastMouseRef.current = {
-      x: event.clientX,
-      y: event.clientY
-    };
-  }, []);
-
-  const handleWheel = useCallback((event) => {
-    event.preventDefault();
-    const zoomSpeed = 0.1;
-    const delta = -Math.sign(event.deltaY) * zoomSpeed;
-    zoomRef.current = Math.max(0.5, Math.min(5.0, zoomRef.current + delta));
-  }, []);
-
-  // Setup scene
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Create scene only once
-    if (!sceneRef.current) {
-      sceneRef.current = new THREE.Scene();
-      rendererRef.current = new THREE.WebGLRenderer({
-        antialias: true,
-        powerPreference: "high-performance"
-      });
+    const container = containerRef.current;
+    if (!container) {
+      return;
     }
 
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    containerRef.current.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.Camera();
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    rendererRef.current = renderer;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
 
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    camera.position.z = 1;
-
-    // Create or update material with selected shader
-    const geometry = new THREE.PlaneGeometry(2, 2);
-    const shader = controls.is2D ? mandelbrotShader : mandelbulbShader;
-    
-    if (materialRef.current) {
-      materialRef.current.dispose();
-    }
-    
-    materialRef.current = new THREE.ShaderMaterial({
+    const material = new THREE.ShaderMaterial({
       vertexShader,
-      fragmentShader: shader,
+      fragmentShader,
       uniforms: {
-        time: { value: 0.0 },
-        rotation: { value: new THREE.Vector2(0.0, 0.0) },
-        zoom: { value: 1.0 },
-        power: { value: controls.power },
-        colorSpeed: { value: controls.colorSpeed },
-        colorIntensity: { value: controls.colorIntensity },
-        distortionScale: { value: controls.distortionScale },
-        pulseSpeed: { value: controls.pulseSpeed },
-        pulseIntensity: { value: controls.pulseIntensity }
+        time: { value: 0 },
+        zoom: { value: viewRef.current.zoom },
+        center: { value: new THREE.Vector2(viewRef.current.centerX, viewRef.current.centerY) },
+        iterations: { value: controls.iterations },
+        colorOffset: { value: controls.colorOffset },
+        resolution: { value: new THREE.Vector2(1, 1) }
       }
     });
+    materialRef.current = material;
 
-    const plane = new THREE.Mesh(geometry, materialRef.current);
-    scene.clear();
-    scene.add(plane);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+    scene.add(mesh);
 
-    // Optimize animation loop
-    const animate = () => {
-      frameIdRef.current = requestAnimationFrame(animate);
-      
-      const material = materialRef.current;
-      if (!material) return;
+    const syncSize = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      renderer.setSize(width, height);
+      material.uniforms.resolution.value.set(width, height);
+    };
 
-      // Update only necessary uniforms
-      material.uniforms.time.value = (Date.now() - startTime.current) * 0.001;
-      material.uniforms.rotation.value.set(rotationRef.current.y, rotationRef.current.x);
-      material.uniforms.zoom.value += (zoomRef.current - material.uniforms.zoom.value) * 0.1;
+    const onPointerDown = (event) => {
+      dragRef.current.active = true;
+      dragRef.current.x = event.clientX;
+      dragRef.current.y = event.clientY;
+    };
+
+    const onPointerUp = () => {
+      dragRef.current.active = false;
+    };
+
+    const onPointerMove = (event) => {
+      if (!dragRef.current.active) {
+        return;
+      }
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const dx = event.clientX - dragRef.current.x;
+      const dy = event.clientY - dragRef.current.y;
+      const scale = 2 / viewRef.current.zoom;
+
+      viewRef.current = {
+        ...viewRef.current,
+        centerX: viewRef.current.centerX - (dx / width) * scale * (width / height),
+        centerY: viewRef.current.centerY + (dy / height) * scale
+      };
+
+      dragRef.current.x = event.clientX;
+      dragRef.current.y = event.clientY;
+      setView({ ...viewRef.current });
+    };
+
+    const onWheel = (event) => {
+      event.preventDefault();
+      const factor = event.deltaY > 0 ? 0.9 : 1.1;
+      viewRef.current = {
+        ...viewRef.current,
+        zoom: Math.min(2000000, Math.max(0.6, viewRef.current.zoom * factor))
+      };
+      setView({ ...viewRef.current });
+    };
+
+    startTimeRef.current = performance.now();
+    syncSize();
+
+    const render = () => {
+      animationRef.current = requestAnimationFrame(render);
+
+      material.uniforms.time.value = (performance.now() - startTimeRef.current) / 1000;
+      material.uniforms.zoom.value = viewRef.current.zoom;
+      material.uniforms.center.value.set(viewRef.current.centerX, viewRef.current.centerY);
+      material.uniforms.iterations.value = controls.iterations;
+      material.uniforms.colorOffset.value = controls.colorOffset;
 
       renderer.render(scene, camera);
     };
 
-    animate();
+    render();
 
-    // Optimized resize handler
-    const handleResize = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-    };
-
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseleave', handleMouseUp);
-    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('resize', syncSize);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointerleave', onPointerUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseleave', handleMouseUp);
-      window.removeEventListener('wheel', handleWheel);
-      
-      cancelAnimationFrame(frameIdRef.current);
+      window.removeEventListener('resize', syncSize);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointerleave', onPointerUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(animationRef.current);
+      mesh.geometry.dispose();
+      material.dispose();
+      renderer.dispose();
+      container.removeChild(renderer.domElement);
     };
-  }, [controls.is2D]); // Add is2D to dependency array
-
-  // Update uniforms when controls change
-  useEffect(() => {
-    if (!materialRef.current) return;
-    
-    Object.keys(controls).forEach(key => {
-      if (materialRef.current.uniforms[key]) {
-        materialRef.current.uniforms[key].value = controls[key];
-      }
-    });
   }, [controls]);
 
-  const handleControlChange = (name, value) => {
-    setControls(prev => ({ ...prev, [name]: parseFloat(value) }));
+  const resetView = () => {
+    viewRef.current = {
+      zoom: initialView.zoom,
+      centerX: initialView.centerX,
+      centerY: initialView.centerY
+    };
+    setView({ ...viewRef.current });
   };
 
   return (
     <>
-      <div ref={containerRef} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} />
-      
-      {/* Controls Panel */}
-      <div style={{
-        position: 'absolute',
-        top: '20px',
-        right: '20px',
-        color: 'white',
-        background: 'rgba(0,0,0,0.7)',
-        padding: '20px',
-        borderRadius: '10px',
-        width: '300px'
-      }}>
-        <h2 style={{ margin: '0 0 15px 0' }}>Fractal Controls</h2>
-        
-        {/* Add 2D/3D toggle */}
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={controls.is2D}
-              onChange={(e) => {
-                setControls(prev => ({ ...prev, is2D: e.target.checked }));
-                // Reset rotation and zoom when switching modes
-                rotationRef.current = { x: 0, y: 0 };
-                zoomRef.current = 1.0;
-              }}
-              style={{ marginRight: '10px' }}
-            />
-            2D Mandelbrot Mode
-          </label>
+      <div
+        ref={containerRef}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background:
+            'radial-gradient(circle at top, rgba(54, 24, 86, 0.45), rgba(5, 5, 10, 1) 60%)'
+        }}
+      />
+
+      <div
+        style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          width: 320,
+          padding: 20,
+          border: '1px solid rgba(255,255,255,0.14)',
+          borderRadius: 18,
+          background: 'rgba(10, 10, 16, 0.72)',
+          color: '#f6f2ff',
+          backdropFilter: 'blur(18px)',
+          boxShadow: '0 18px 40px rgba(0, 0, 0, 0.35)'
+        }}
+      >
+        <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', opacity: 0.68 }}>
+          Three.js Mandelbrot
+        </div>
+        <h1 style={{ margin: '8px 0 6px', fontSize: 28, lineHeight: 1.1 }}>Pure shader view</h1>
+        <p style={{ margin: '0 0 18px', fontSize: 14, lineHeight: 1.5, opacity: 0.8 }}>
+          Drag to pan. Scroll to zoom.
+        </p>
+
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 8 }}>
+          Iterations: {controls.iterations}
+        </label>
+        <input
+          type="range"
+          min="60"
+          max="400"
+          step="1"
+          value={controls.iterations}
+          onChange={(event) => {
+            setControls((current) => ({
+              ...current,
+              iterations: Number(event.target.value)
+            }));
+          }}
+          style={{ width: '100%', marginBottom: 18 }}
+        />
+
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 8 }}>
+          Palette offset: {controls.colorOffset.toFixed(2)}
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={controls.colorOffset}
+          onChange={(event) => {
+            setControls((current) => ({
+              ...current,
+              colorOffset: Number(event.target.value)
+            }));
+          }}
+          style={{ width: '100%', marginBottom: 18 }}
+        />
+
+        <div style={{ fontSize: 13, lineHeight: 1.6, opacity: 0.8 }}>
+          <div>Zoom: {view.zoom.toFixed(view.zoom >= 10 ? 1 : 3)}x</div>
+          <div>Center X: {view.centerX.toFixed(6)}</div>
+          <div>Center Y: {view.centerY.toFixed(6)}</div>
         </div>
 
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Power: {controls.power}
-          </label>
-          <input
-            type="range"
-            min="2"
-            max="16"
-            step="0.1"
-            value={controls.power}
-            onChange={(e) => handleControlChange('power', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Color Speed: {controls.colorSpeed}
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={controls.colorSpeed}
-            onChange={(e) => handleControlChange('colorSpeed', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Color Intensity: {controls.colorIntensity}
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={controls.colorIntensity}
-            onChange={(e) => handleControlChange('colorIntensity', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Distortion Scale: {controls.distortionScale}
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="10"
-            step="0.1"
-            value={controls.distortionScale}
-            onChange={(e) => handleControlChange('distortionScale', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Pulse Speed: {controls.pulseSpeed}
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="5"
-            step="0.1"
-            value={controls.pulseSpeed}
-            onChange={(e) => handleControlChange('pulseSpeed', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            Pulse Intensity: {controls.pulseIntensity}
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="0.5"
-            step="0.01"
-            value={controls.pulseIntensity}
-            onChange={(e) => handleControlChange('pulseIntensity', e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginTop: '20px', fontSize: '0.9em', opacity: '0.8' }}>
-          <p style={{ margin: '5px 0' }}>• Move mouse to rotate view</p>
-          <p style={{ margin: '5px 0' }}>• Scroll to zoom in/out</p>
-        </div>
+        <button
+          type="button"
+          onClick={resetView}
+          style={{
+            marginTop: 18,
+            width: '100%',
+            border: 0,
+            borderRadius: 12,
+            padding: '12px 14px',
+            background: '#f6f2ff',
+            color: '#120b1d',
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          Reset view
+        </button>
       </div>
     </>
   );
-} 
+}
