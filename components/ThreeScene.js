@@ -229,8 +229,12 @@ export default function ThreeScene() {
         style={{
           position: 'fixed',
           inset: 0,
-          background:
-            'radial-gradient(circle at top, rgba(54, 24, 86, 0.45), rgba(5, 5, 10, 1) 60%)'
+          backgroundColor: '#05050a',
+          backgroundImage:
+            "radial-gradient(circle at top, rgba(54, 24, 86, 0.45), rgba(5, 5, 10, 1) 60%), url('/mandelbrot-fallback.svg')",
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: 'cover'
         }}
       />
 

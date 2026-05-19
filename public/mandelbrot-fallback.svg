@@ -1,0 +1,40 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" fill="#030307"/>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <g filter="url(#glow)">
+    <path d="M939 450C939 383 885 329 818 329H751C705 329 668 292 668 246C668 200 705 163 751 163C797 163 834 200 834 246V272H924V246C924 150 847 73 751 73C655 73 578 150 578 246C578 342 655 419 751 419H818C835 419 849 433 849 450C849 467 835 481 818 481H658C621 481 591 451 591 414C591 377 621 347 658 347C695 347 725 377 725 414V432H805V414C805 333 739 267 658 267C577 267 511 333 511 414C511 495 577 561 658 561H818C885 561 939 507 939 450Z" fill="url(#core)"/>
+    <circle cx="497" cy="414" r="58" fill="url(#orb)"/>
+    <circle cx="407" cy="414" r="28" fill="url(#orb)"/>
+    <circle cx="357" cy="414" r="12" fill="url(#orb)"/>
+  </g>
+  <g opacity="0.45">
+    <circle cx="770" cy="450" r="236" stroke="url(#ring)" stroke-width="4"/>
+    <circle cx="770" cy="450" r="298" stroke="url(#ring)" stroke-width="2"/>
+  </g>
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(980 260) rotate(140) scale(1095 915)">
+      <stop stop-color="#1A0D2A"/>
+      <stop offset="0.42" stop-color="#0C0A16"/>
+      <stop offset="1" stop-color="#020204"/>
+    </radialGradient>
+    <linearGradient id="core" x1="357" y1="317" x2="939" y2="317" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42E8E0"/>
+      <stop offset="0.52" stop-color="#6EA8FF"/>
+      <stop offset="1" stop-color="#FF9B39"/>
+    </linearGradient>
+    <linearGradient id="orb" x1="357" y1="414" x2="555" y2="414" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8FFFF8"/>
+      <stop offset="1" stop-color="#5D8BFF"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="468" y1="450" x2="1068" y2="450" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5FD2FF" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#C27CFF"/>
+      <stop offset="1" stop-color="#FFA43A" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="293" y="9" width="710" height="616" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+      <feGaussianBlur stdDeviation="32" result="effect1_foregroundBlur_1_2"/>
+    </filter>
+  </defs>
+</svg>
