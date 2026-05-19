@@ -1,136 +1,112 @@
 import { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-
-const vertexShader = `
-  varying vec2 vUv;
-
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position, 1.0);
-  }
-`;
-
-const fragmentShader = `
-  varying vec2 vUv;
-
-  uniform float time;
-  uniform float zoom;
-  uniform vec2 center;
-  uniform float iterations;
-  uniform float colorOffset;
-  uniform vec2 resolution;
-
-  vec3 palette(float t) {
-    vec3 a = vec3(0.12, 0.08, 0.18);
-    vec3 b = vec3(0.55, 0.45, 0.35);
-    vec3 c = vec3(1.0, 0.9, 0.7);
-    vec3 d = vec3(0.0, 0.15, 0.25);
-    return a + b * cos(6.28318 * (c * t + d));
-  }
-
-  void main() {
-    vec2 uv = (vUv - 0.5) * 2.0;
-    uv.x *= resolution.x / resolution.y;
-
-    vec2 c = center + uv / zoom;
-    vec2 z = vec2(0.0);
-    float escapedAt = iterations;
-
-    for (int i = 0; i < 400; i++) {
-      if (float(i) >= iterations) {
-        break;
-      }
-
-      z = vec2(
-        z.x * z.x - z.y * z.y + c.x,
-        2.0 * z.x * z.y + c.y
-      );
-
-      if (dot(z, z) > 4.0) {
-        float smooth = float(i) + 1.0 - log2(log2(dot(z, z)));
-        escapedAt = smooth;
-        break;
-      }
-    }
-
-    if (escapedAt >= iterations) {
-      gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);
-      return;
-    }
-
-    float t = escapedAt / iterations;
-    vec3 color = palette(t + colorOffset + time * 0.03);
-    color *= 0.85 + 0.15 * sin(6.28318 * (t + time * 0.04));
-
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
 
 const initialView = {
-  zoom: 0.9,
-  centerX: -0.5,
+  zoom: 0.95,
+  centerX: -0.7,
   centerY: 0.0
 };
 
+function paletteColor(t, offset) {
+  const x = t + offset;
+  const r = Math.round(40 + 215 * (0.5 + 0.5 * Math.cos(6.28318 * (x + 0.0))));
+  const g = Math.round(20 + 160 * (0.5 + 0.5 * Math.cos(6.28318 * (x + 0.18))));
+  const b = Math.round(60 + 195 * (0.5 + 0.5 * Math.cos(6.28318 * (x + 0.34))));
+  return [r, g, b];
+}
+
 export default function ThreeScene() {
-  const containerRef = useRef(null);
-  const rendererRef = useRef(null);
-  const materialRef = useRef(null);
-  const animationRef = useRef(null);
-  const startTimeRef = useRef(0);
-  const dragRef = useRef({
-    active: false,
-    x: 0,
-    y: 0
-  });
-  const viewRef = useRef({
-    zoom: initialView.zoom,
-    centerX: initialView.centerX,
-    centerY: initialView.centerY
-  });
+  const canvasRef = useRef(null);
+  const dragRef = useRef({ active: false, x: 0, y: 0 });
+  const viewRef = useRef({ ...initialView });
+  const renderTokenRef = useRef(0);
 
   const [controls, setControls] = useState({
     iterations: 180,
-    colorOffset: 0.0
+    colorOffset: 0
   });
-  const [view, setView] = useState(viewRef.current);
+  const [view, setView] = useState({ ...initialView });
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
+    const canvas = canvasRef.current;
+    if (!canvas) {
       return;
     }
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.Camera();
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    rendererRef.current = renderer;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
-    container.appendChild(renderer.domElement);
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) {
+      return;
+    }
 
-    const material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: {
-        time: { value: 0 },
-        zoom: { value: viewRef.current.zoom },
-        center: { value: new THREE.Vector2(viewRef.current.centerX, viewRef.current.centerY) },
-        iterations: { value: controls.iterations },
-        colorOffset: { value: controls.colorOffset },
-        resolution: { value: new THREE.Vector2(1, 1) }
-      }
-    });
-    materialRef.current = material;
-
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
-    scene.add(mesh);
-
-    const syncSize = () => {
+    const syncCanvas = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
-      renderer.setSize(width, height);
-      material.uniforms.resolution.value.set(width, height);
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      renderMandelbrot();
+    };
+
+    const renderMandelbrot = () => {
+      const token = ++renderTokenRef.current;
+      const width = canvas.width;
+      const height = canvas.height;
+      const aspect = width / height;
+      const image = context.createImageData(width, height);
+      let y = 0;
+
+      const drawChunk = () => {
+        if (token !== renderTokenRef.current) {
+          return;
+        }
+
+        const maxY = Math.min(height, y + 24);
+        for (; y < maxY; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const scaledX = ((x / width) - 0.5) * 3.2 / viewRef.current.zoom * aspect + viewRef.current.centerX;
+            const scaledY = ((y / height) - 0.5) * 3.2 / viewRef.current.zoom + viewRef.current.centerY;
+
+            let zx = 0;
+            let zy = 0;
+            let iteration = 0;
+
+            while (zx * zx + zy * zy <= 4 && iteration < controls.iterations) {
+              const nextX = zx * zx - zy * zy + scaledX;
+              zy = 2 * zx * zy + scaledY;
+              zx = nextX;
+              iteration += 1;
+            }
+
+            const index = (y * width + x) * 4;
+            if (iteration === controls.iterations) {
+              image.data[index] = 4;
+              image.data[index + 1] = 4;
+              image.data[index + 2] = 10;
+              image.data[index + 3] = 255;
+              continue;
+            }
+
+            const magnitude = Math.sqrt(zx * zx + zy * zy);
+            const smooth = iteration + 1 - Math.log2(Math.log2(Math.max(magnitude, 2)));
+            const normalized = smooth / controls.iterations;
+            const [r, g, b] = paletteColor(normalized, controls.colorOffset);
+
+            image.data[index] = r;
+            image.data[index + 1] = g;
+            image.data[index + 2] = b;
+            image.data[index + 3] = 255;
+          }
+        }
+
+        context.putImageData(image, 0, 0);
+
+        if (y < height) {
+          requestAnimationFrame(drawChunk);
+        }
+      };
+
+      drawChunk();
     };
 
     const onPointerDown = (event) => {
@@ -152,7 +128,7 @@ export default function ThreeScene() {
       const height = window.innerHeight;
       const dx = event.clientX - dragRef.current.x;
       const dy = event.clientY - dragRef.current.y;
-      const scale = 2 / viewRef.current.zoom;
+      const scale = 3.2 / viewRef.current.zoom;
 
       viewRef.current = {
         ...viewRef.current,
@@ -163,36 +139,22 @@ export default function ThreeScene() {
       dragRef.current.x = event.clientX;
       dragRef.current.y = event.clientY;
       setView({ ...viewRef.current });
+      renderMandelbrot();
     };
 
     const onWheel = (event) => {
       event.preventDefault();
-      const factor = event.deltaY > 0 ? 0.9 : 1.1;
+      const factor = event.deltaY > 0 ? 0.88 : 1.14;
       viewRef.current = {
         ...viewRef.current,
-        zoom: Math.min(2000000, Math.max(0.6, viewRef.current.zoom * factor))
+        zoom: Math.min(2000000, Math.max(0.7, viewRef.current.zoom * factor))
       };
       setView({ ...viewRef.current });
+      renderMandelbrot();
     };
 
-    startTimeRef.current = performance.now();
-    syncSize();
-
-    const render = () => {
-      animationRef.current = requestAnimationFrame(render);
-
-      material.uniforms.time.value = (performance.now() - startTimeRef.current) / 1000;
-      material.uniforms.zoom.value = viewRef.current.zoom;
-      material.uniforms.center.value.set(viewRef.current.centerX, viewRef.current.centerY);
-      material.uniforms.iterations.value = controls.iterations;
-      material.uniforms.colorOffset.value = controls.colorOffset;
-
-      renderer.render(scene, camera);
-    };
-
-    render();
-
-    window.addEventListener('resize', syncSize);
+    syncCanvas();
+    window.addEventListener('resize', syncCanvas);
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointerleave', onPointerUp);
@@ -200,42 +162,52 @@ export default function ThreeScene() {
     window.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
-      window.removeEventListener('resize', syncSize);
+      renderTokenRef.current += 1;
+      window.removeEventListener('resize', syncCanvas);
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointerleave', onPointerUp);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('wheel', onWheel);
-      cancelAnimationFrame(animationRef.current);
-      mesh.geometry.dispose();
-      material.dispose();
-      renderer.dispose();
-      container.removeChild(renderer.domElement);
     };
   }, [controls]);
 
   const resetView = () => {
-    viewRef.current = {
-      zoom: initialView.zoom,
-      centerX: initialView.centerX,
-      centerY: initialView.centerY
-    };
-    setView({ ...viewRef.current });
+    viewRef.current = { ...initialView };
+    setView({ ...initialView });
+    renderTokenRef.current += 1;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.dispatchEvent(new Event('refresh'));
+    }
   };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const rerender = () => {
+      const event = new Event('resize');
+      window.dispatchEvent(event);
+    };
+
+    canvas.addEventListener('refresh', rerender);
+    return () => canvas.removeEventListener('refresh', rerender);
+  }, []);
 
   return (
     <>
-      <div
-        ref={containerRef}
+      <canvas
+        ref={canvasRef}
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: '#05050a',
+          display: 'block',
+          backgroundColor: '#04030a',
           backgroundImage:
-            "radial-gradient(circle at top, rgba(54, 24, 86, 0.45), rgba(5, 5, 10, 1) 60%), url('/mandelbrot-fallback.svg')",
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          backgroundSize: 'cover'
+            "radial-gradient(circle at top, rgba(54, 24, 86, 0.42), rgba(5, 5, 10, 1) 60%)"
         }}
       />
 
@@ -255,9 +227,9 @@ export default function ThreeScene() {
         }}
       >
         <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', opacity: 0.68 }}>
-          Three.js Mandelbrot
+          Mandelbrot Viewer
         </div>
-        <h1 style={{ margin: '8px 0 6px', fontSize: 28, lineHeight: 1.1 }}>Pure shader view</h1>
+        <h1 style={{ margin: '8px 0 6px', fontSize: 28, lineHeight: 1.1 }}>Interactive set</h1>
         <p style={{ margin: '0 0 18px', fontSize: 14, lineHeight: 1.5, opacity: 0.8 }}>
           Drag to pan. Scroll to zoom.
         </p>
@@ -267,8 +239,8 @@ export default function ThreeScene() {
         </label>
         <input
           type="range"
-          min="60"
-          max="400"
+          min="80"
+          max="320"
           step="1"
           value={controls.iterations}
           onChange={(event) => {
